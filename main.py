@@ -182,24 +182,39 @@ async def add_prod_desc(message: Message, state: FSMContext):
     await state.update_data(name=message.text)
     await message.answer("Ma'lumot (o'lchami, materiali):")
     await state.set_state(AddProduct.desc)
-
 @router.message(AddProduct.desc)
 async def add_prod_price(message: Message, state: FSMContext):
     await state.update_data(desc=message.text)
-    await message.answer("Narxini kiriting:")
+    
+    # Narxni kiritish uchun moslashuvchan klaviatura
+    builder = ReplyKeyboardBuilder()
+    builder.button(text="🤝 Kelishiladi")
+    builder.button(text="❌ Bekor qilish")
+    builder.adjust(1)
+    
+    await message.answer(
+        "Mahsulot narxini qanday ko'rsatamiz?\n\n"
+        "Siz bu yerga ixtiyoriy matn yozishingiz mumkin (Masalan: <i>'1 kv.m uchun 2 mln so`mdan'</i> yoki <i>'MDF uchun alohida narx'</i>).\n\n"
+        "Agar aniq narx yozishni xohlamasangiz, pastdagi <b>'🤝 Kelishiladi'</b> tugmasini bosing:",
+        reply_markup=builder.as_markup(resize_keyboard=True)
+    )
     await state.set_state(AddProduct.price)
 
 @router.message(AddProduct.price)
 async def add_prod_save(message: Message, state: FSMContext):
     data = await state.get_data()
+    price_text = message.text
+    
     conn = sqlite3.connect("mebel.db")
     conn.execute("INSERT INTO products (cat_id, name, desc, price, photo_id) VALUES (?, ?, ?, ?, ?)",
-                 (data['cat_id'], data['name'], data['desc'], message.text, data['photo']))
+                 (data['cat_id'], data['name'], data['desc'], price_text, data['photo']))
     conn.commit()
     conn.close()
-    await message.answer_photo(data['photo'], caption=f"✅ Saqlandi!\n🛋 {data['name']}", reply_markup=admin_keyboard())
+    
+    caption = f"✅ Saqlandi!\n\n🛋 <b>{data['name']}</b>\n📝 {data['desc']}\n💰 <b>Narxi:</b> {price_text}"
+    
+    await message.answer_photo(data['photo'], caption=caption, reply_markup=admin_keyboard())
     await state.clear()
-
 # ================= 7. ADMIN: XODIM VA RASSILKA =================
 @router.message(F.text == "👥 Xodim qo'shish")
 async def add_staff(message: Message, state: FSMContext):
