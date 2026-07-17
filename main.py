@@ -1,3 +1,4 @@
+from aiogram.client.default import DefaultBotProperties
 import asyncio
 import logging
 import sqlite3
@@ -13,8 +14,7 @@ BOT_TOKEN = "8919365987:AAGrk40jcCBExtEj8_vDQhwk6OV8xzwpXYo"
 # O'zingizning Telegram ID raqamingizni yozing (Barcha huquqlarga ega asosiy admin)
 MAIN_ADMIN_ID = 8488028783
 
-bot = Bot(token=BOT_TOKEN, parse_mode="HTML")
-dp = Dispatcher()
+bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))dp = Dispatcher()
 router = Router()
 dp.include_router(router)
 
