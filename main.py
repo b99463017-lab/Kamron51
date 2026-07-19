@@ -14,7 +14,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 # ==========================================
 # 0. SOZLAMALAR
 # ==========================================
-BOT_TOKEN = ""
+BOT_TOKEN = "8919365987:AAGrk40jcCBExtEj8_vDQhwk6OV8xzwpXYo"
 WORKER_GROUP_ID = 8488028783  # Ustalarga xabar boradigan guruh ID sini yozasiz (yoki admin ID)
 
 bot = Bot(token=BOT_TOKEN)
