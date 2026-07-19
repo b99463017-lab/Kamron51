@@ -21,7 +21,7 @@ from aiogram.types import (
 
 # ============================== CONFIG ======================================
 
-BOT_TOKEN = "8919365987:AAGrk40jcCBExtEj8_vDQhwk6OV8xzwpXYo"
+BOT_TOKEN = "8919365987:AAHsSGcZaBJXN9hs-FMy_t_3OB6pUi_e3cg"
 ADMIN_IDS = [8488028783]          # bootstrap admin(lar) Telegram ID raqami(lari)
 WORKER_GROUP_ID = None            # ustalar guruhining chat_id si (masalan -1001234567890)
 DB_PATH = "gold_mebel.db"
