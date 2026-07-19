@@ -1,35 +1,3 @@
-# -*- coding: utf-8 -*-
-"""
-GOLD MEBEL — Telegram bot (aiogram 3.x, aiosqlite)
-
-O'rnatish:
-    pip install aiogram aiosqlite
-
-Ishga tushirish:
-    1) Pastdagi CONFIG bo'limiga BOT_TOKEN va ADMIN_IDS ni kiriting.
-    2) python main.py
-
-Bot funksiyalari (qisqacha):
-    - Ro'yxatdan o'tish (ism + telefon)
-    - Kategoriyalar bo'yicha katalog, rasm-karusel (⬅️ ➡️), Top mebellar
-    - Savat, Tanlanganlar (❤️)
-    - Buyurtma: ombordan (mavjud) yoki "buyurtma asosida" (omborda yo'q)
-    - Lokatsiya orqali masofani hisoblash (Haversine, km/m)
-    - "Bizning manzil", "Qo'ng'iroq so'rash", "Yordam" (admin tahrirlaydi)
-    - "O'z loyihangizni yuboring" — mijoz rasm+tavsif yuboradi
-    - Buyurtmalarim (status, bekor qilish)
-    - "Kelganda xabar bering" — ombor to'ldirilganda avtomatik xabar
-    - Ustalar guruhi: buyurtma tushadi, [Qabul qilish], xarita havolasi,
-      status o'zgartirish
-    - Admin panel: bo'lim/mahsulot CRUD (xavfsiz o'chirish), ombor nazorati,
-      foydalanuvchilarni boshqarish (qidiruv, admin/usta qilish, ban),
-      sozlamalar (manzil, telefon, yordam matni, ish vaqti on/off),
-      statistika, broadcast (hammaga / faqat ustalarga)
-    - Bot ichidagi CRM: admin/usta xabarga "Reply" qilsa, mijozga yetadi
-    - Unikal buyurtma ID (#B-XXXX), throttling, deep-link (mahsulotga havola),
-      haftalik avtomatik backup (bazani adminga yuborish)
-"""
-
 import asyncio
 import json
 import logging
@@ -53,8 +21,8 @@ from aiogram.types import (
 
 # ============================== CONFIG ======================================
 
-BOT_TOKEN = "PUT_YOUR_BOT_TOKEN_HERE"
-ADMIN_IDS = [123456789]          # bootstrap admin(lar) Telegram ID raqami(lari)
+BOT_TOKEN = "8919365987:AAGrk40jcCBExtEj8_vDQhwk6OV8xzwpXYo"
+ADMIN_IDS = [8488028783]          # bootstrap admin(lar) Telegram ID raqami(lari)
 WORKER_GROUP_ID = None            # ustalar guruhining chat_id si (masalan -1001234567890)
 DB_PATH = "gold_mebel.db"
 
