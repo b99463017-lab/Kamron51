@@ -245,19 +245,18 @@ async def kb_main(tg_id: int):
     kb = [[KeyboardButton(text=t) for t in row] for row in rows]
     return ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True)
 
-
 def kb_admin():
     """Admin panel uchun oddiy tugmalar (ReplyKeyboardMarkup)"""
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="🗂 Bo'limlar boshqaruvi"), KeyboardButton(text="📦 Ombor nazorati")],
-            [KeyboardButton(text="👥 Mijozlar bo'limi"), KeyboardButton(text="📊 Statistika")],
-            [KeyboardButton(text="📣 Xabar yuborish"), KeyboardButton(text="🖼 Portfolio")],
-            [KeyboardButton(text="⚙️ Sozlamalar"), KeyboardButton(text="🏠 Asosiy menyu")]
+            [KeyboardButton(text="👥 Mijozlar bo'limi"), KeyboardButton(text="👨‍💼 Xodimlar")], # <--- SHU YERGA QO'SHILDI
+            [KeyboardButton(text="📊 Statistika"), KeyboardButton(text="📣 Xabar yuborish")],
+            [KeyboardButton(text="🖼 Portfolio"), KeyboardButton(text="⚙️ Sozlamalar")],
+            [KeyboardButton(text="🏠 Asosiy menyu")]
         ],
         resize_keyboard=True
     )
-
 
 def ikb(rows):
     """rows: list of list of (text, callback_data)"""
@@ -267,7 +266,48 @@ def ikb(rows):
             for row in rows
         ]
     )
+# 👨‍💼 Xodimlar bo'limi tugmasi bosilganda
+@router.message(F.text == "👨‍💼 Xodimlar")
+async def adm_staff_menu(message: Message):
+    if not await is_admin(message.from_user.id):
+        return
+    await message.answer(
+        "👨‍💼 <b>Xodimlar bo'limi</b>\n\n"
+        "Admin yoki Usta qilmoqchi bo'lgan foydalanuvchining **Telegram ID** raqamini yuboring "
+        "(yoki pastdagi mijozlar bo'limidan foydalaning):"
+    )
 
+# Admin yoki Usta qilish uchun ID raqam yuborilganda ishlaydigan qism
+@router.message(F.text.regexp(r"^\d+$"))
+async def adm_set_role_by_id(message: Message):
+    if not await is_admin(message.from_user.id):
+        return
+    
+    target_id = int(message.text)
+    user = await get_user(target_id)
+    
+    if not user:
+        await message.answer(f"❌ ID: <code>{target_id}</code> bo'lgan foydalanuvchi bazadan topilmadi. U avval botga /start bosgan bo'lishi kerak.")
+        return
+
+    role_text = "👑 Admin" if user["role"] == "admin" else ("🛠 Usta" if user["role"] == "worker" else "👤 Oddiy mijoz")
+    
+    text = (
+        f"👤 <b>Topilgan foydalanuvchi:</b>\n"
+        f"Ismi: {user['name']}\n"
+        f"Raqami: {user['phone']}\n"
+        f"ID: <code>{user['tg_id']}</code>\n"
+        f"Hozirgi roli: {role_text}\n\n"
+        f"Ushbu foydalanuvchiga qaysi lavozimni bermoqchisiz?"
+    )
+    
+    await message.answer(
+        text,
+        reply_markup=ikb([
+            [("👑 Admin qilish", f"adm_user_role:{target_id}:admin"), ("🛠 Usta qilish", f"adm_user_role:{target_id}:worker")],
+            [("👤 Oddiy mijoz qilish", f"adm_user_role:{target_id}:user")]
+        ])
+    )
 
 # ============================== FSM STATES ===================================
 
