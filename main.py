@@ -53,6 +53,54 @@ class ThrottleMiddleware(BaseMiddleware):
         return await handler(event, data)
 
 router.callback_query.middleware(ThrottleMiddleware())
+from aiogram import Router, F
+from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.enums import ParseMode
+
+router = Router()
+
+# 1. Mijozlar bo'limi tugmasi bosilganda
+@router.message(F.text == "👥 Mijozlar bo'limi")
+async def mijozlar_bo_limi(message: Message):
+    # Bu yerda bazadan olingan mijozlarni tsikl orqali matnga yig'ib olasiz
+    text = (
+        "<b>👥 Barcha mijozlar ro'yxati:</b>\n\n"
+        "<b>1.</b> 👤 <b>Behruz</b>\n"
+        "├ 🆔 <code>8488028783</code>\n"
+        "└ 📞 +998954261261\n\n"
+        "<b>2.</b> 👤 <b>Alisher</b>\n"
+        "├ 🆔 <code>1234567890</code>\n"
+        "└ 📞 +998901234567\n\n"
+        "📊 <b>Jami mijozlar:</b> 2 ta"
+    )
+    
+    await message.answer(text, parse_mode=ParseMode.HTML)
+
+
+# 2. Xodimlar bo'limi tugmasi bosilganda
+@router.message(F.text == "👨‍💼 Xodimlar")
+async def xodimlar_bo_limi(message: Message):
+    # Inline tugmalarni shakllantiramiz
+    xodimlar_buttons = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="🛠 Usta qo'shish", callback_data="add_usta"),
+                InlineKeyboardButton(text="👑 Admin qo'shish", callback_data="add_admin")
+            ]
+        ]
+    )
+
+    text = (
+        "<b>👨‍💼 Xodimlar bo'limi</b>\n\n"
+        "<i>Joriy xodimlar ro'yxati:</i>\n\n"
+        "👑 <b>Adminlar:</b>\n"
+        "▫️ Behruz | 🆔 <code>8488028783</code>\n\n"
+        "🛠 <b>Ustalar:</b>\n"
+        "▫️ Sanjar | 🆔 <code>1234567890</code>\n\n"
+        "👇 <i>Yangi xodim qo'shish uchun quyidagi tugmalardan foydalaning:</i>"
+    )
+
+    await message.answer(text, reply_markup=xodimlar_buttons, parse_mode=ParseMode.HTML)
 
 # ============================== FSM STATES ===================================
 
