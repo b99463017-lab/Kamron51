@@ -1087,7 +1087,6 @@ async def adm_staff_menu(message: Message):
     if not await is_admin(message.from_user.id):
         return
     
-    # Bazadan adminlar va ustalarni olamiz
     cur = await db.execute("SELECT * FROM users WHERE role IN ('admin', 'worker')")
     staff = await cur.fetchall()
     
@@ -1103,16 +1102,16 @@ async def adm_staff_menu(message: Message):
         "<b>👨‍💼 Xodimlar bo'limi</b>\n\n"
         "<i>Joriy xodimlar ro'yxati:</i>\n\n"
         "👑 <b>Adminlar:</b>\n"
-        f"{admin_text if admin_text else 'Yoq'}\n"
+        f"{admin_text if admin_text else 'Yo\'q'}\n"
         "🛠 <b>Ustalar:</b>\n"
-        f"{worker_text if worker_text else 'Yoq'}\n"
-        "👇 <i>Yangi xodim qo'shish uchun uning **Telegram ID** raqamini botga yuboring "
+        f"{worker_text if worker_text else 'Yo\'q'}\n"
+        "👇 <i>Yangi xodim qo'shish uchun uning <b>Telegram ID</b> raqamini botga yuboring "
         "(yoki Mijozlar bo'limidan foydalaning):</i>"
     )
     await message.answer(text, parse_mode=ParseMode.HTML)
 
 
-@router.message(F.text.regexp(r"^\d+$"))
+@router.message(F.text.isdigit())
 async def adm_set_role_by_id(message: Message):
     if not await is_admin(message.from_user.id):
         return
@@ -1673,6 +1672,7 @@ async def fallback(message: Message):
 async def main():
     await init_db()
     asyncio.create_task(auto_backup_loop())
+    await bot.delete_webhook(drop_pending_updates=True)
     log.info("Bot ishga tushdi.")
     await dp.start_polling(bot)
 
