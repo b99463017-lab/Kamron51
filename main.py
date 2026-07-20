@@ -3,6 +3,7 @@ import json
 import logging
 import math
 import time
+
 from datetime import datetime, timedelta
 import aiosqlite
 from aiogram import Bot, Dispatcher, Router, F, BaseMiddleware
@@ -17,6 +18,10 @@ from aiogram.types import (
     ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove,
     InputMediaPhoto, FSInputFile,
 )
+from aiogram import Router
+
+router = Router()
+dp.include_router(router)
 
 # ============================== CONFIG ======================================
 
