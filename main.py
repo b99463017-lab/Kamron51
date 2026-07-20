@@ -18,25 +18,88 @@ from aiogram.types import (
     ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove,
     InputMediaPhoto, FSInputFile,
 )
-from aiogram import Router
-
-router = Router()
-dp.include_router(router)
 
 # ============================== CONFIG ======================================
 
 BOT_TOKEN = "8919365987:AAHsSGcZaBJXN9hs-FMy_t_3OB6pUi_e3cg"
 ADMIN_IDS = [8488028783]          # Admin Telegram ID
-WORKER_GROUP_ID = None            # ustalar guruhining chat_id si
+WORKER_GROUP_ID = None            # Ustalar guruhining chat_id si
 DB_PATH = "gold_mebel.db"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("gold_mebel")
 
+# ============================== BOT & ROUTER INIT ===========================
+# Obyektlar eng boshida to'g'ri ketma-ketlikda yaratilishi kerak
+
+bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+dp = Dispatcher(storage=MemoryStorage())
+router = Router()
+dp.include_router(router)
+
+# ============================== MIDDLEWARES =================================
+
+class ThrottleMiddleware(BaseMiddleware):
+    def __init__(self):
+        self.last = {}
+
+    async def __call__(self, handler, event: CallbackQuery, data):
+        uid = event.from_user.id
+        now = time.monotonic()
+        if now - self.last.get(uid, 0) < 0.6:
+            await event.answer("Iltimos, biroz kuting...", show_alert=False)
+            return
+        self.last[uid] = now
+        return await handler(event, data)
+
+router.callback_query.middleware(ThrottleMiddleware())
+
+# ============================== FSM STATES ===================================
+
+class Reg(StatesGroup):
+    name = State()
+    phone = State()
+
+class EditProfile(StatesGroup):
+    name = State()
+    phone = State()
+
+class AdminCat(StatesGroup):
+    add_name = State()
+    edit_name = State()
+
+class AdminProd(StatesGroup):
+    name = State()
+    desc = State()
+    qty = State()
+    price = State()
+    new_price = State()
+    photos = State()
+    edit_value = State()
+
+class OrderFlow(StatesGroup):
+    location = State()
+    comment = State()
+
+class CustomOrder(StatesGroup):
+    photo = State()
+    desc = State()
+
+class AdminSettingsFSM(StatesGroup):
+    phone = State()
+    location = State()
+    help_text = State()
+
+class AdminBroadcastFSM(StatesGroup):
+    message = State()
+
+class AdminUserSearchFSM(StatesGroup):
+    query = State()
+
+
 # ============================== DATABASE ====================================
 
 db: aiosqlite.Connection = None
-
 
 async def init_db():
     global db
@@ -149,12 +212,10 @@ async def init_db():
         )
     await db.commit()
 
-
 async def get_setting(key: str) -> str:
     cur = await db.execute("SELECT value FROM settings WHERE key=?", (key,))
     row = await cur.fetchone()
     return row["value"] if row else None
-
 
 async def set_setting(key: str, value: str):
     await db.execute(
@@ -163,7 +224,6 @@ async def set_setting(key: str, value: str):
         (key, value),
     )
     await db.commit()
-
 
 # ============================== UTILS =======================================
 
@@ -175,22 +235,18 @@ def haversine_km(lat1, lon1, lat2, lon2) -> float:
     a = math.sin(dphi / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dlmb / 2) ** 2
     return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
-
 def fmt_distance(km: float) -> str:
     if km < 1:
         return f"{int(km * 1000)} m"
     return f"{km:.1f} km"
-
 
 def fmt_price(price):
     if price is None:
         return "Kelishiladi 🤝"
     return f"{int(price):,} so'm".replace(",", " ")
 
-
 def maps_link(lat, lon) -> str:
     return f"https://www.google.com/maps?q={lat},{lon}"
-
 
 async def is_admin(tg_id: int) -> bool:
     if tg_id in ADMIN_IDS:
@@ -199,7 +255,6 @@ async def is_admin(tg_id: int) -> bool:
     row = await cur.fetchone()
     return bool(row and row["role"] == "admin")
 
-
 async def is_worker(tg_id: int) -> bool:
     if await is_admin(tg_id):
         return True
@@ -207,16 +262,13 @@ async def is_worker(tg_id: int) -> bool:
     row = await cur.fetchone()
     return bool(row and row["role"] == "worker")
 
-
 async def get_user(tg_id: int):
     cur = await db.execute("SELECT * FROM users WHERE tg_id=?", (tg_id,))
     return await cur.fetchone()
 
-
 async def gen_order_code() -> str:
     import random
     return f"#B-{random.randint(1000, 9999)}"
-
 
 # ============================== KEYBOARDS ====================================
 
@@ -226,14 +278,12 @@ def kb_phone():
         resize_keyboard=True,
     )
 
-
 def kb_location():
     return ReplyKeyboardMarkup(
         keyboard=[[KeyboardButton(text="📍 Lokatsiyani yuborish", request_location=True)],
                   [KeyboardButton(text="⛔️ Bekor qilish")]],
         resize_keyboard=True,
     )
-
 
 async def kb_main(tg_id: int):
     rows = [
@@ -251,11 +301,10 @@ async def kb_main(tg_id: int):
     return ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True)
 
 def kb_admin():
-    """Admin panel uchun oddiy tugmalar (ReplyKeyboardMarkup)"""
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="🗂 Bo'limlar boshqaruvi"), KeyboardButton(text="📦 Ombor nazorati")],
-            [KeyboardButton(text="👥 Mijozlar bo'limi"), KeyboardButton(text="👨‍💼 Xodimlar")], # <--- SHU YERGA QO'SHILDI
+            [KeyboardButton(text="👥 Mijozlar bo'limi"), KeyboardButton(text="👨‍💼 Xodimlar")], 
             [KeyboardButton(text="📊 Statistika"), KeyboardButton(text="📣 Xabar yuborish")],
             [KeyboardButton(text="🖼 Portfolio"), KeyboardButton(text="⚙️ Sozlamalar")],
             [KeyboardButton(text="🏠 Asosiy menyu")]
@@ -264,14 +313,15 @@ def kb_admin():
     )
 
 def ikb(rows):
-    """rows: list of list of (text, callback_data)"""
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text=t, callback_data=cd) for (t, cd) in row]
             for row in rows
         ]
     )
-# 👨‍💼 Xodimlar bo'limi tugmasi bosilganda
+
+# ============================== HANDLERS =====================================
+
 @router.message(F.text == "👨‍💼 Xodimlar")
 async def adm_staff_menu(message: Message):
     if not await is_admin(message.from_user.id):
@@ -282,21 +332,16 @@ async def adm_staff_menu(message: Message):
         "(yoki pastdagi mijozlar bo'limidan foydalaning):"
     )
 
-# Admin yoki Usta qilish uchun ID raqam yuborilganda ishlaydigan qism
 @router.message(F.text.regexp(r"^\d+$"))
 async def adm_set_role_by_id(message: Message):
     if not await is_admin(message.from_user.id):
         return
-    
     target_id = int(message.text)
     user = await get_user(target_id)
-    
     if not user:
         await message.answer(f"❌ ID: <code>{target_id}</code> bo'lgan foydalanuvchi bazadan topilmadi. U avval botga /start bosgan bo'lishi kerak.")
         return
-
     role_text = "👑 Admin" if user["role"] == "admin" else ("🛠 Usta" if user["role"] == "worker" else "👤 Oddiy mijoz")
-    
     text = (
         f"👤 <b>Topilgan foydalanuvchi:</b>\n"
         f"Ismi: {user['name']}\n"
@@ -305,7 +350,6 @@ async def adm_set_role_by_id(message: Message):
         f"Hozirgi roli: {role_text}\n\n"
         f"Ushbu foydalanuvchiga qaysi lavozimni bermoqchisiz?"
     )
-    
     await message.answer(
         text,
         reply_markup=ikb([
@@ -314,83 +358,6 @@ async def adm_set_role_by_id(message: Message):
         ])
     )
 
-# ============================== FSM STATES ===================================
-
-class Reg(StatesGroup):
-    name = State()
-    phone = State()
-
-
-class EditProfile(StatesGroup):
-    name = State()
-    phone = State()
-
-
-class AdminCat(StatesGroup):
-    add_name = State()
-    edit_name = State()
-
-
-class AdminProd(StatesGroup):
-    name = State()
-    desc = State()
-    qty = State()
-    price = State()
-    new_price = State()
-    photos = State()
-    edit_value = State()
-
-
-class OrderFlow(StatesGroup):
-    location = State()
-    comment = State()
-
-
-class CustomOrder(StatesGroup):
-    photo = State()
-    desc = State()
-
-
-class AdminSettingsFSM(StatesGroup):
-    phone = State()
-    location = State()
-    help_text = State()
-
-
-class AdminBroadcastFSM(StatesGroup):
-    message = State()
-
-
-class AdminUserSearchFSM(StatesGroup):
-    query = State()
-
-
-# ============================== BOT / DP =====================================
-
-bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
-dp = Dispatcher(storage=MemoryStorage())
-router = Router()
-dp.include_router(router)
-
-
-class ThrottleMiddleware(BaseMiddleware):
-    def __init__(self):
-        self.last = {}
-
-    async def __call__(self, handler, event: CallbackQuery, data):
-        uid = event.from_user.id
-        now = time.monotonic()
-        if now - self.last.get(uid, 0) < 0.6:
-            await event.answer("Iltimos, biroz kuting...", show_alert=False)
-            return
-        self.last[uid] = now
-        return await handler(event, data)
-
-
-router.callback_query.middleware(ThrottleMiddleware())
-
-# ============================== START / REGISTRATION =========================
-
 @router.message(CommandStart())
 async def cmd_start(message: Message, state: FSMContext, command: CommandObject = None):
     await state.clear()
@@ -398,7 +365,6 @@ async def cmd_start(message: Message, state: FSMContext, command: CommandObject 
     if user and user["banned"]:
         await message.answer("Kechirasiz, sizga botdan foydalanish cheklangan.")
         return
-
     if not user:
         await state.set_state(Reg.name)
         await message.answer(
@@ -406,11 +372,9 @@ async def cmd_start(message: Message, state: FSMContext, command: CommandObject 
             "Ro'yxatdan o'tish uchun ismingizni yozing:"
         )
         return
-
     await message.answer(
         f"Xush kelibsiz, {user['name']}!", reply_markup=await kb_main(message.from_user.id)
     )
-
     if command and command.args and command.args.startswith("product_"):
         try:
             pid = int(command.args.split("_", 1)[1])
@@ -418,11 +382,9 @@ async def cmd_start(message: Message, state: FSMContext, command: CommandObject 
         except Exception:
             pass
 
-
 @router.message(F.text == "🏠 Asosiy menyu")
 async def back_to_main(message: Message, state: FSMContext):
     await cmd_start(message, state)
-
 
 @router.message(Reg.name)
 async def reg_name(message: Message, state: FSMContext):
@@ -430,16 +392,13 @@ async def reg_name(message: Message, state: FSMContext):
     await state.set_state(Reg.phone)
     await message.answer("Endi telefon raqamingizni yuboring:", reply_markup=kb_phone())
 
-
 @router.message(Reg.phone, F.contact)
 async def reg_phone_contact(message: Message, state: FSMContext):
     await _finish_reg(message, state, message.contact.phone_number)
 
-
 @router.message(Reg.phone, F.text)
 async def reg_phone_text(message: Message, state: FSMContext):
     await _finish_reg(message, state, message.text.strip())
-
 
 async def _finish_reg(message: Message, state: FSMContext, phone: str):
     data = await state.get_data()
@@ -456,8 +415,6 @@ async def _finish_reg(message: Message, state: FSMContext, phone: str):
         reply_markup=await kb_main(message.from_user.id),
     )
 
-
-# Profile editing
 @router.message(F.text == "👤 Profil")
 async def profile_menu(message: Message):
     user = await get_user(message.from_user.id)
@@ -474,20 +431,17 @@ async def profile_menu(message: Message):
         ]),
     )
 
-
 @router.callback_query(F.data == "editprofile:name")
 async def editprofile_name(call: CallbackQuery, state: FSMContext):
     await state.set_state(EditProfile.name)
     await call.message.answer("Yangi ismingizni yozing:")
     await call.answer()
 
-
 @router.callback_query(F.data == "editprofile:phone")
 async def editprofile_phone(call: CallbackQuery, state: FSMContext):
     await state.set_state(EditProfile.phone)
     await call.message.answer("Yangi telefon raqamingizni yuboring:", reply_markup=kb_phone())
     await call.answer()
-
 
 @router.message(EditProfile.name)
 async def save_new_name(message: Message, state: FSMContext):
@@ -496,23 +450,19 @@ async def save_new_name(message: Message, state: FSMContext):
     await state.clear()
     await message.answer("✅ Ism yangilandi.", reply_markup=await kb_main(message.from_user.id))
 
-
 @router.message(EditProfile.phone, F.contact)
 async def save_new_phone_c(message: Message, state: FSMContext):
     await _save_new_phone(message, state, message.contact.phone_number)
 
-
 @router.message(EditProfile.phone, F.text)
 async def save_new_phone_t(message: Message, state: FSMContext):
     await _save_new_phone(message, state, message.text.strip())
-
 
 async def _save_new_phone(message, state, phone):
     await db.execute("UPDATE users SET phone=? WHERE tg_id=?", (phone, message.from_user.id))
     await db.commit()
     await state.clear()
     await message.answer("✅ Telefon raqam yangilandi.", reply_markup=await kb_main(message.from_user.id))
-
 
 # ============================== CATALOG ======================================
 
@@ -532,13 +482,11 @@ async def catalog_open(message: Message):
         rows.append([(c["name"], f"cat:{c['id']}")])
     await message.answer("🗂 Bo'limni tanlang:", reply_markup=ikb(rows))
 
-
 @router.callback_query(F.data == "topcat")
 async def show_top(call: CallbackQuery):
     cur = await db.execute("SELECT id FROM products WHERE is_top=1")
     rows = await cur.fetchall()
     await _show_product_grid(call, [r["id"] for r in rows], "🔥 Top mebellar")
-
 
 @router.callback_query(F.data.startswith("cat:"))
 async def show_category(call: CallbackQuery):
@@ -548,7 +496,6 @@ async def show_category(call: CallbackQuery):
     cat = await db.execute("SELECT name FROM categories WHERE id=?", (cat_id,))
     cat_row = await cat.fetchone()
     await _show_product_grid(call, [r["id"] for r in rows], cat_row["name"] if cat_row else "Bo'lim")
-
 
 async def _show_product_grid(call: CallbackQuery, product_ids, title):
     if not product_ids:
@@ -580,7 +527,6 @@ async def _show_product_grid(call: CallbackQuery, product_ids, title):
             await bot.send_message(call.message.chat.id, caption, reply_markup=kb)
     await call.answer()
 
-
 async def _product_caption(p, idx, total_photos) -> str:
     lines = [f"<b>{p['name']}</b>  (Kod: {p['sku']})"]
     if p["description"]:
@@ -596,7 +542,6 @@ async def _product_caption(p, idx, total_photos) -> str:
     if total_photos > 1:
         lines.append(f"\n🖼 {idx + 1}/{total_photos}")
     return "\n".join(lines)
-
 
 async def _product_kb(p, user_id, idx):
     fav_cur = await db.execute(
@@ -625,7 +570,6 @@ async def _product_kb(p, user_id, idx):
     rows.append([("↩️ Ulashish", f"share:{p['id']}")])
     return ikb(rows)
 
-
 async def show_product(chat_id, user_id, product_id, idx):
     cur = await db.execute("SELECT * FROM products WHERE id=?", (product_id,))
     p = await cur.fetchone()
@@ -640,13 +584,11 @@ async def show_product(chat_id, user_id, product_id, idx):
     else:
         await bot.send_message(chat_id, caption, reply_markup=kb)
 
-
 @router.callback_query(F.data.startswith("prod:"))
 async def cb_show_product(call: CallbackQuery):
     pid = int(call.data.split(":")[1])
     await show_product(call.message.chat.id, call.from_user.id, pid, 0)
     await call.answer()
-
 
 @router.callback_query(F.data.startswith("prodimg:"))
 async def cb_prod_img(call: CallbackQuery):
@@ -662,7 +604,6 @@ async def cb_prod_img(call: CallbackQuery):
     except Exception:
         pass
     await call.answer()
-
 
 @router.callback_query(F.data.startswith("fav:"))
 async def cb_toggle_fav(call: CallbackQuery):
@@ -687,7 +628,6 @@ async def cb_toggle_fav(call: CallbackQuery):
     except Exception:
         pass
 
-
 @router.callback_query(F.data.startswith("share:"))
 async def cb_share(call: CallbackQuery):
     pid = int(call.data.split(":")[1])
@@ -695,7 +635,6 @@ async def cb_share(call: CallbackQuery):
     link = f"https://t.me/{me.username}?start=product_{pid}"
     await call.message.answer(f"🔗 Ulashish uchun havola:\n{link}")
     await call.answer()
-
 
 @router.callback_query(F.data.startswith("notifyme:"))
 async def cb_notify_me(call: CallbackQuery):
@@ -705,7 +644,6 @@ async def cb_notify_me(call: CallbackQuery):
     )
     await db.commit()
     await call.answer("✅ Mebel omborga kelganda sizga xabar beramiz.", show_alert=True)
-
 
 @router.message(F.text == "❤️ Tanlanganlar")
 async def show_favorites(message: Message):
@@ -718,7 +656,6 @@ async def show_favorites(message: Message):
         p = await (await db.execute("SELECT * FROM products WHERE id=?", (r["product_id"],))).fetchone()
         if p:
             await show_product(message.chat.id, message.from_user.id, p["id"], 0)
-
 
 # ============================== CART =========================================
 
@@ -734,11 +671,9 @@ async def cb_add_cart(call: CallbackQuery):
     await db.commit()
     await call.answer("🛒 Savatga qo'shildi")
 
-
 @router.message(F.text == "🛒 Savat")
 async def show_cart(message: Message):
     await _render_cart(message.chat.id, message.from_user.id)
-
 
 async def _render_cart(chat_id, user_id):
     cur = await db.execute("SELECT * FROM cart WHERE user_id=?", (user_id,))
@@ -762,7 +697,6 @@ async def _render_cart(chat_id, user_id):
     rows.append([("✅ Buyurtma berish", "checkout")])
     await bot.send_message(chat_id, text, reply_markup=ikb(rows))
 
-
 @router.callback_query(F.data.startswith("cartdel:"))
 async def cb_cart_del(call: CallbackQuery):
     cid = int(call.data.split(":")[1])
@@ -771,14 +705,12 @@ async def cb_cart_del(call: CallbackQuery):
     await call.answer("O'chirildi")
     await _render_cart(call.message.chat.id, call.from_user.id)
 
-
 @router.callback_query(F.data == "cartclear")
 async def cb_cart_clear(call: CallbackQuery):
     await db.execute("DELETE FROM cart WHERE user_id=?", (call.from_user.id,))
     await db.commit()
     await call.answer("Savat tozalandi")
     await call.message.answer("🗑 Savat bo'shatildi.")
-
 
 # ============================== ORDER FLOW ===================================
 
@@ -792,7 +724,6 @@ async def cb_buy_single(call: CallbackQuery, state: FSMContext):
         reply_markup=kb_location(),
     )
     await call.answer()
-
 
 @router.callback_query(F.data == "checkout")
 async def cb_checkout(call: CallbackQuery, state: FSMContext):
@@ -808,12 +739,10 @@ async def cb_checkout(call: CallbackQuery, state: FSMContext):
     )
     await call.answer()
 
-
 @router.message(OrderFlow.location, F.text == "⛔️ Bekor qilish")
 async def order_cancel_flow(message: Message, state: FSMContext):
     await state.clear()
     await message.answer("Bekor qilindi.", reply_markup=await kb_main(message.from_user.id))
-
 
 @router.message(OrderFlow.location, F.location)
 async def order_got_location(message: Message, state: FSMContext):
@@ -824,7 +753,6 @@ async def order_got_location(message: Message, state: FSMContext):
         "Agar bo'lmasa /skip deb yozing.",
         reply_markup=ReplyKeyboardRemove(),
     )
-
 
 @router.message(OrderFlow.comment)
 async def order_got_comment(message: Message, state: FSMContext):
@@ -875,7 +803,6 @@ async def order_got_comment(message: Message, state: FSMContext):
     )
     await _notify_workers_new_order(order_id)
 
-
 async def _split_stock(p, qty):
     result = []
     if p["quantity"] and p["quantity"] > 0:
@@ -888,7 +815,6 @@ async def _split_stock(p, qty):
     else:
         result.append((p["id"], p["name"], qty, p["price"], "custom"))
     return result
-
 
 async def _notify_workers_new_order(order_id):
     o = await (await db.execute("SELECT * FROM orders WHERE id=?", (order_id,))).fetchone()
@@ -925,7 +851,6 @@ async def _notify_workers_new_order(order_id):
         except Exception:
             pass
     await db.commit()
-
 
 @router.callback_query(F.data.startswith("take:"))
 async def cb_worker_take(call: CallbackQuery):
@@ -965,11 +890,9 @@ async def cb_worker_take(call: CallbackQuery):
         pass
     await call.answer("Qabul qilindi ✅")
 
-
 @router.callback_query(F.data == "noop")
 async def cb_noop(call: CallbackQuery):
     await call.answer()
-
 
 @router.callback_query(F.data.startswith("ordstatus:"))
 async def cb_order_status(call: CallbackQuery):
@@ -984,7 +907,6 @@ async def cb_order_status(call: CallbackQuery):
     except Exception:
         pass
     await call.answer("Holat yangilandi")
-
 
 # ============================== MY ORDERS ====================================
 
@@ -1009,7 +931,6 @@ async def my_orders(message: Message):
             kb = ikb([[("❌ Bekor qilish", f"ordcancel:{o['id']}")]])
         await message.answer(text, reply_markup=kb)
 
-
 @router.callback_query(F.data.startswith("ordcancel:"))
 async def cb_order_cancel(call: CallbackQuery):
     order_id = int(call.data.split(":")[1])
@@ -1027,7 +948,6 @@ async def cb_order_cancel(call: CallbackQuery):
         except Exception:
             pass
 
-
 # ============================== CUSTOM ORDER (own project) ===================
 
 @router.message(F.text == "📐 O'z loyihamni yuborish")
@@ -1035,13 +955,11 @@ async def custom_order_start(message: Message, state: FSMContext):
     await state.set_state(CustomOrder.photo)
     await message.answer("O'zingiz xohlagan mebel rasmini yuboring:")
 
-
 @router.message(CustomOrder.photo, F.photo)
 async def custom_order_photo(message: Message, state: FSMContext):
     await state.update_data(photo=message.photo[-1].file_id)
     await state.set_state(CustomOrder.desc)
     await message.answer("Endi taxminiy o'lcham va tavsifni yozing:")
-
 
 @router.message(CustomOrder.desc)
 async def custom_order_desc(message: Message, state: FSMContext):
@@ -1068,7 +986,6 @@ async def custom_order_desc(message: Message, state: FSMContext):
         reply_markup=await kb_main(message.from_user.id),
     )
 
-
 # ============================== ADDRESS / HELP / CALL ========================
 
 @router.message(F.text == "📍 Bizning manzil")
@@ -1079,12 +996,10 @@ async def show_address(message: Message):
     await message.answer(f"☎️ Telefon: {phone}")
     await message.answer_location(lat, lon)
 
-
 @router.message(F.text == "🆘 Yordam")
 async def show_help(message: Message):
     text = await get_setting("help_text")
     await message.answer(f"🆘 {text}")
-
 
 @router.message(F.text == "☎️ Qo'ng'iroq so'rash")
 async def call_request(message: Message):
@@ -1107,7 +1022,6 @@ async def call_request(message: Message):
     await db.commit()
     await message.answer("✅ So'rovingiz yuborildi, tez orada sizga qo'ng'iroq qilamiz.")
 
-
 # ============================== CRM: REPLY ===================================
 
 @router.message(F.reply_to_message)
@@ -1126,7 +1040,6 @@ async def crm_reply_handler(message: Message):
         await message.reply("✅ Mijozga yuborildi.")
     except Exception:
         await message.reply("❌ Mijozga yuborib bo'lmadi (u botni bloklagan bo'lishi mumkin).")
-
 
 # ============================== WORKER PANEL =================================
 
@@ -1152,7 +1065,6 @@ async def worker_panel(message: Message):
             ]),
         )
 
-
 # ============================== ADMIN PANEL ==================================
 
 @router.message(F.text == "⚙️ Admin panel")
@@ -1164,8 +1076,7 @@ async def admin_panel(message: Message):
         reply_markup=kb_admin()
     )
 
-
-# ---------- Clients Management ("Mijozlar bo'limi") ----------
+# ---------- Clients Management ----------
 
 @router.message(F.text == "👥 Mijozlar bo'limi")
 async def adm_clients_menu(message: Message):
@@ -1180,14 +1091,11 @@ async def adm_clients_menu(message: Message):
     for u in rows:
         await _send_user_card(message.chat.id, u)
 
-
 async def _send_user_card(chat_id, u):
     cnt = await (await db.execute(
         "SELECT COUNT(*) n, COALESCE(SUM(total),0) s FROM orders WHERE user_id=?", (u["tg_id"],)
     )).fetchone()
-
     role_text = "👑 Admin" if u["role"] == "admin" else ("🛠 Usta" if u["role"] == "worker" else "👤 Oddiy mijoz")
-
     text = (
         f"👤 <b>Ismi:</b> {u['name']}\n"
         f"📞 <b>Raqami:</b> {u['phone']}\n"
@@ -1196,7 +1104,6 @@ async def _send_user_card(chat_id, u):
         f"🚫 <b>Holati:</b> {'Bloklangan' if u['banned'] else 'Faol'}\n"
         f"📦 <b>Buyurtmalari:</b> {cnt['n']} ta ({fmt_price(cnt['s'])})"
     )
-
     rows = []
     if u["role"] != "worker":
         rows.append([("🛠 Usta qilish", f"adm_user_role:{u['tg_id']}:worker")])
@@ -1204,46 +1111,28 @@ async def _send_user_card(chat_id, u):
         rows.append([("👑 Admin qilish", f"adm_user_role:{u['tg_id']}:admin")])
     if u["role"] != "user":
         rows.append([("👤 Oddiy foydalanuvchi qilish", f"adm_user_role:{u['tg_id']}:user")])
-
     if u["banned"]:
         rows.append([("✅ Blokdan chiqarish", f"adm_user_ban:{u['tg_id']}:0")])
     else:
         rows.append([("🚫 Bloklash", f"adm_user_ban:{u['tg_id']}:1")])
-
     rows.append([("🗑 Foydalanuvchini o'chirish", f"adm_user_del:{u['tg_id']}")])
-
     await bot.send_message(chat_id, text, reply_markup=ikb(rows))
-
 
 @router.callback_query(F.data.startswith("adm_user_role:"))
 async def adm_user_role(call: CallbackQuery):
     _, tg_id, role = call.data.split(":")
     tg_id = int(tg_id)
     user = await get_user(tg_id)
-
     await db.execute("UPDATE users SET role=? WHERE tg_id=?", (role, tg_id))
     await db.commit()
-
-    role_titles = {
-        "admin": "Admin 👑",
-        "worker": "Usta 🛠",
-        "user": "Foydalanuvchi 👤"
-    }
+    role_titles = {"admin": "Admin 👑", "worker": "Usta 🛠", "user": "Foydalanuvchi 👤"}
     title = role_titles.get(role, role)
-
     await call.answer(f"Lavozim: {title}")
     await call.message.answer(f"✅ Foydalanuvchi ({user['name']}) lavozimi '{title}' qilib belgilandi.")
-
-    # Send notification to user
     try:
-        await bot.send_message(
-            tg_id,
-            f"🎉 Siz <b>{title}</b> qilindingiz!\nIsmingiz: <b>{user['name']}</b>",
-            reply_markup=await kb_main(tg_id)
-        )
+        await bot.send_message(tg_id, f"🎉 Siz <b>{title}</b> qilindingiz!\nIsmingiz: <b>{user['name']}</b>", reply_markup=await kb_main(tg_id))
     except Exception:
         pass
-
 
 @router.callback_query(F.data.startswith("adm_user_ban:"))
 async def adm_user_ban(call: CallbackQuery):
@@ -1253,7 +1142,6 @@ async def adm_user_ban(call: CallbackQuery):
     await call.answer("Bajarildi")
     await call.message.answer("✅ Foydalanuvchi holati yangilandi.")
 
-
 @router.callback_query(F.data.startswith("adm_user_del:"))
 async def adm_user_del(call: CallbackQuery):
     tg_id = int(call.data.split(":")[1])
@@ -1261,7 +1149,6 @@ async def adm_user_del(call: CallbackQuery):
     await db.commit()
     await call.answer("Foydalanuvchi o'chirildi", show_alert=True)
     await call.message.delete()
-
 
 # ---------- Categories Management ----------
 
@@ -1278,13 +1165,11 @@ async def adm_cats(message: Message):
     rows.append([("➕ Yangi bo'lim qo'shish", "adm_cat_add")])
     await message.answer("🗂 Bo'limlar boshqaruvi:", reply_markup=ikb(rows))
 
-
 @router.callback_query(F.data == "adm_cat_add")
 async def adm_cat_add(call: CallbackQuery, state: FSMContext):
     await state.set_state(AdminCat.add_name)
     await call.message.answer("Yangi bo'lim nomini yozing:")
     await call.answer()
-
 
 @router.message(AdminCat.add_name)
 async def adm_cat_add_save(message: Message, state: FSMContext):
@@ -1292,7 +1177,6 @@ async def adm_cat_add_save(message: Message, state: FSMContext):
     await db.commit()
     await state.clear()
     await message.answer("✅ Bo'lim qo'shildi.", reply_markup=kb_admin())
-
 
 @router.callback_query(F.data.startswith("adm_cat_open:"))
 async def adm_cat_open(call: CallbackQuery):
@@ -1306,7 +1190,6 @@ async def adm_cat_open(call: CallbackQuery):
     await call.message.answer("Bo'lim boshqaruvi:", reply_markup=ikb(rows))
     await call.answer()
 
-
 @router.callback_query(F.data.startswith("adm_cat_rename:"))
 async def adm_cat_rename(call: CallbackQuery, state: FSMContext):
     cat_id = int(call.data.split(":")[1])
@@ -1315,7 +1198,6 @@ async def adm_cat_rename(call: CallbackQuery, state: FSMContext):
     await call.message.answer("Yangi nomni yozing:")
     await call.answer()
 
-
 @router.message(AdminCat.edit_name)
 async def adm_cat_rename_save(message: Message, state: FSMContext):
     data = await state.get_data()
@@ -1323,7 +1205,6 @@ async def adm_cat_rename_save(message: Message, state: FSMContext):
     await db.commit()
     await state.clear()
     await message.answer("✅ Yangilandi.", reply_markup=kb_admin())
-
 
 @router.callback_query(F.data.startswith("adm_cat_del:"))
 async def adm_cat_del(call: CallbackQuery):
@@ -1341,7 +1222,6 @@ async def adm_cat_del(call: CallbackQuery):
         await call.message.answer("✅ Bo'lim o'chirildi.")
     await call.answer()
 
-
 @router.callback_query(F.data.startswith("adm_cat_del_confirm:"))
 async def adm_cat_del_confirm(call: CallbackQuery):
     cat_id = int(call.data.split(":")[1])
@@ -1350,7 +1230,6 @@ async def adm_cat_del_confirm(call: CallbackQuery):
     await db.commit()
     await call.message.answer("✅ Bo'lim va uning mahsulotlari o'chirildi.")
     await call.answer()
-
 
 # ---------- Products Management ----------
 
@@ -1362,13 +1241,11 @@ async def adm_prod_add(call: CallbackQuery, state: FSMContext):
     await call.message.answer("Mahsulot nomini yozing:")
     await call.answer()
 
-
 @router.message(AdminProd.name)
 async def adm_prod_name(message: Message, state: FSMContext):
     await state.update_data(name=message.text.strip())
     await state.set_state(AdminProd.desc)
     await message.answer("Tavsifini yozing (yoki /skip):")
-
 
 @router.message(AdminProd.desc)
 async def adm_prod_desc(message: Message, state: FSMContext):
@@ -1376,7 +1253,6 @@ async def adm_prod_desc(message: Message, state: FSMContext):
     await state.update_data(description=desc)
     await state.set_state(AdminProd.qty)
     await message.answer("Ombordagi sonini yozing (masalan 0 yoki 5):")
-
 
 @router.message(AdminProd.qty)
 async def adm_prod_qty(message: Message, state: FSMContext):
@@ -1392,7 +1268,6 @@ async def adm_prod_qty(message: Message, state: FSMContext):
         reply_markup=ikb([[("💰 Aniq narx", "ptype:exact")], [("🤝 Narxni kelishamiz", "ptype:negotiate")]]),
     )
 
-
 @router.callback_query(F.data == "ptype:negotiate", AdminProd.price)
 async def adm_prod_price_negotiate(call: CallbackQuery, state: FSMContext):
     await state.update_data(price=None, old_price=None)
@@ -1400,12 +1275,10 @@ async def adm_prod_price_negotiate(call: CallbackQuery, state: FSMContext):
     await call.message.answer("Endi mahsulot rasm(lar)ini yuboring. Tugagach /done deb yozing.")
     await call.answer()
 
-
 @router.callback_query(F.data == "ptype:exact", AdminProd.price)
 async def adm_prod_price_exact(call: CallbackQuery, state: FSMContext):
     await call.message.answer("Narxni kiriting (so'mda, faqat raqam):")
     await call.answer()
-
 
 @router.message(AdminProd.price)
 async def adm_prod_price_value(message: Message, state: FSMContext):
@@ -1421,7 +1294,6 @@ async def adm_prod_price_value(message: Message, state: FSMContext):
         reply_markup=ikb([[("Ha", "discount:yes")], [("Yo'q", "discount:no")]]),
     )
 
-
 @router.callback_query(F.data == "discount:no", AdminProd.new_price)
 async def adm_prod_discount_no(call: CallbackQuery, state: FSMContext):
     await state.update_data(old_price=None)
@@ -1429,12 +1301,10 @@ async def adm_prod_discount_no(call: CallbackQuery, state: FSMContext):
     await call.message.answer("Endi mahsulot rasm(lar)ini yuboring. Tugagach /done deb yozing.")
     await call.answer()
 
-
 @router.callback_query(F.data == "discount:yes", AdminProd.new_price)
 async def adm_prod_discount_yes(call: CallbackQuery, state: FSMContext):
     await call.message.answer("Yangi (chegirmali) narxni kiriting:")
     await call.answer()
-
 
 @router.message(AdminProd.new_price)
 async def adm_prod_new_price_value(message: Message, state: FSMContext):
@@ -1448,7 +1318,6 @@ async def adm_prod_new_price_value(message: Message, state: FSMContext):
     await state.set_state(AdminProd.photos)
     await message.answer("Endi mahsulot rasm(lar)ini yuboring. Tugagach /done deb yozing.")
 
-
 @router.message(AdminProd.photos, F.photo)
 async def adm_prod_photo(message: Message, state: FSMContext):
     data = await state.get_data()
@@ -1456,7 +1325,6 @@ async def adm_prod_photo(message: Message, state: FSMContext):
     photos.append(message.photo[-1].file_id)
     await state.update_data(photos=photos)
     await message.answer(f"✅ Rasm qo'shildi ({len(photos)}). Yana yuboring yoki /done deb tugating.")
-
 
 @router.message(AdminProd.photos, Command("done"))
 async def adm_prod_done(message: Message, state: FSMContext):
@@ -1476,7 +1344,6 @@ async def adm_prod_done(message: Message, state: FSMContext):
     await state.clear()
     await message.answer("✅ Mahsulot qo'shildi!", reply_markup=kb_admin())
 
-
 @router.callback_query(F.data.startswith("adm_prod_edit:"))
 async def adm_prod_edit(call: CallbackQuery):
     pid = int(call.data.split(":")[1])
@@ -1495,7 +1362,6 @@ async def adm_prod_edit(call: CallbackQuery):
     ]))
     await call.answer()
 
-
 @router.callback_query(F.data.startswith("adm_prod_toptoggle:"))
 async def adm_prod_toptoggle(call: CallbackQuery):
     pid = int(call.data.split(":")[1])
@@ -1504,7 +1370,6 @@ async def adm_prod_toptoggle(call: CallbackQuery):
     await db.commit()
     await call.answer("Yangilandi")
 
-
 @router.callback_query(F.data.startswith("adm_prod_del:"))
 async def adm_prod_del(call: CallbackQuery):
     pid = int(call.data.split(":")[1])
@@ -1512,7 +1377,6 @@ async def adm_prod_del(call: CallbackQuery):
     await db.commit()
     await call.message.answer("✅ Mahsulot o'chirildi.")
     await call.answer()
-
 
 @router.callback_query(F.data.startswith("adm_prod_set:"))
 async def adm_prod_set(call: CallbackQuery, state: FSMContext):
@@ -1528,7 +1392,6 @@ async def adm_prod_set(call: CallbackQuery, state: FSMContext):
     await call.message.answer(prompts[field])
     await call.answer()
 
-
 @router.message(AdminProd.edit_value, F.photo)
 async def adm_prod_edit_photo(message: Message, state: FSMContext):
     data = await state.get_data()
@@ -1538,7 +1401,6 @@ async def adm_prod_edit_photo(message: Message, state: FSMContext):
     photos.append(message.photo[-1].file_id)
     await state.update_data(photos=photos)
     await message.answer(f"✅ Qabul qilindi ({len(photos)}). Yana yuboring yoki /done.")
-
 
 @router.message(AdminProd.edit_value, Command("done"))
 async def adm_prod_edit_photos_done(message: Message, state: FSMContext):
@@ -1551,7 +1413,6 @@ async def adm_prod_edit_photos_done(message: Message, state: FSMContext):
     await db.commit()
     await state.clear()
     await message.answer("✅ Rasmlar yangilandi.", reply_markup=kb_admin())
-
 
 @router.message(AdminProd.edit_value)
 async def adm_prod_edit_value(message: Message, state: FSMContext):
@@ -1581,7 +1442,6 @@ async def adm_prod_edit_value(message: Message, state: FSMContext):
     await state.clear()
     await message.answer("✅ Yangilandi.", reply_markup=kb_admin())
 
-
 async def _notify_waiting_customers(product_id):
     p = await (await db.execute("SELECT * FROM products WHERE id=?", (product_id,))).fetchone()
     cur = await db.execute("SELECT user_id FROM notify_stock WHERE product_id=?", (product_id,))
@@ -1593,7 +1453,6 @@ async def _notify_waiting_customers(product_id):
             pass
     await db.execute("DELETE FROM notify_stock WHERE product_id=?", (product_id,))
     await db.commit()
-
 
 # ---------- Stock Controls ----------
 
@@ -1608,7 +1467,6 @@ async def adm_zero_stock(message: Message):
     else:
         text = "📦 <b>Omborda tugagan mahsulotlar:</b>\n\n" + "\n".join(f"• {p['name']} ({p['sku']})" for p in rows)
         await message.answer(text)
-
 
 # ---------- Settings ----------
 
@@ -1627,7 +1485,6 @@ async def adm_settings(message: Message):
         ]),
     )
 
-
 @router.callback_query(F.data == "adm_set_workhours")
 async def adm_set_workhours(call: CallbackQuery):
     cur_val = await get_setting("is_open")
@@ -1635,13 +1492,11 @@ async def adm_set_workhours(call: CallbackQuery):
     await set_setting("is_open", new_val)
     await call.answer("Yangilandi: " + ("Ochiq ✅" if new_val == "1" else "Yopiq 🌙"), show_alert=True)
 
-
 @router.callback_query(F.data == "adm_set_phone")
 async def adm_set_phone(call: CallbackQuery, state: FSMContext):
     await state.set_state(AdminSettingsFSM.phone)
     await call.message.answer("Yangi telefon raqamini yozing:")
     await call.answer()
-
 
 @router.message(AdminSettingsFSM.phone)
 async def adm_set_phone_save(message: Message, state: FSMContext):
@@ -1649,13 +1504,11 @@ async def adm_set_phone_save(message: Message, state: FSMContext):
     await state.clear()
     await message.answer("✅ Yangilandi.", reply_markup=kb_admin())
 
-
 @router.callback_query(F.data == "adm_set_location")
 async def adm_set_location(call: CallbackQuery, state: FSMContext):
     await state.set_state(AdminSettingsFSM.location)
     await call.message.answer("Ustaxona lokatsiyasini yuboring:", reply_markup=kb_location())
     await call.answer()
-
 
 @router.message(AdminSettingsFSM.location, F.location)
 async def adm_set_location_save(message: Message, state: FSMContext):
@@ -1664,20 +1517,17 @@ async def adm_set_location_save(message: Message, state: FSMContext):
     await state.clear()
     await message.answer("✅ Yangilandi.", reply_markup=kb_admin())
 
-
 @router.callback_query(F.data == "adm_set_help")
 async def adm_set_help(call: CallbackQuery, state: FSMContext):
     await state.set_state(AdminSettingsFSM.help_text)
     await call.message.answer("Yangi yordam matnini yozing:")
     await call.answer()
 
-
 @router.message(AdminSettingsFSM.help_text)
 async def adm_set_help_save(message: Message, state: FSMContext):
     await set_setting("help_text", message.text.strip())
     await state.clear()
     await message.answer("✅ Yordam matni yangilandi.", reply_markup=kb_admin())
-
 
 # ---------- Portfolio ----------
 
@@ -1688,7 +1538,6 @@ async def adm_portfolio(message: Message):
     await message.answer(
         "🖼 Portfolio uchun rasm yuboring, izoh sifatida caption yozing (masalan: 'portfolio: 2024-yil yotoqxona to'plami').",
     )
-
 
 @router.message(F.photo, F.caption.startswith("portfolio:"))
 async def adm_portfolio_add(message: Message):
@@ -1701,7 +1550,6 @@ async def adm_portfolio_add(message: Message):
     await db.commit()
     await message.answer("✅ Portfolioga qo'shildi.")
 
-
 # ---------- Broadcast ----------
 
 @router.message(F.text == "📣 Xabar yuborish")
@@ -1713,7 +1561,6 @@ async def adm_broadcast(message: Message):
         reply_markup=ikb([[("👥 Hammaga", "bc:all")], [("🛠 Faqat ustalarga", "bc:workers")]]),
     )
 
-
 @router.callback_query(F.data.startswith("bc:"))
 async def adm_broadcast_target(call: CallbackQuery, state: FSMContext):
     target = call.data.split(":")[1]
@@ -1721,7 +1568,6 @@ async def adm_broadcast_target(call: CallbackQuery, state: FSMContext):
     await state.set_state(AdminBroadcastFSM.message)
     await call.message.answer("Xabar matnini yuboring:")
     await call.answer()
-
 
 @router.message(AdminBroadcastFSM.message)
 async def adm_broadcast_send(message: Message, state: FSMContext):
@@ -1741,7 +1587,6 @@ async def adm_broadcast_send(message: Message, state: FSMContext):
         await asyncio.sleep(0.05)
     await state.clear()
     await message.answer(f"✅ Yuborildi: {ok}, xatolik: {fail}", reply_markup=kb_admin())
-
 
 # ---------- Statistics ----------
 
@@ -1777,7 +1622,6 @@ async def adm_stats(message: Message):
     )
     await message.answer(text)
 
-
 # ============================== BACKGROUND: AUTO BACKUP ======================
 
 async def auto_backup_loop():
@@ -1793,7 +1637,6 @@ async def auto_backup_loop():
         except Exception as e:
             log.exception("Backup xatosi: %s", e)
 
-
 # ============================== FALLBACK =====================================
 
 @router.message()
@@ -1804,7 +1647,6 @@ async def fallback(message: Message):
         return
     await message.answer("Iltimos, menyudan foydalaning 👇", reply_markup=await kb_main(message.from_user.id))
 
-
 # ============================== MAIN =========================================
 
 async def main():
@@ -1812,7 +1654,6 @@ async def main():
     asyncio.create_task(auto_backup_loop())
     log.info("Bot ishga tushdi.")
     await dp.start_polling(bot)
-
 
 if __name__ == "__main__":
     asyncio.run(main())
