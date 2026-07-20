@@ -3,8 +3,8 @@ import json
 import logging
 import math
 import time
-
 from datetime import datetime, timedelta
+
 import aiosqlite
 from aiogram import Bot, Dispatcher, Router, F, BaseMiddleware
 from aiogram.client.default import DefaultBotProperties
@@ -30,7 +30,6 @@ logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("gold_mebel")
 
 # ============================== BOT & ROUTER INIT ===========================
-# Obyektlar eng boshida to'g'ri ketma-ketlikda yaratilishi kerak
 
 bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher(storage=MemoryStorage())
@@ -53,54 +52,6 @@ class ThrottleMiddleware(BaseMiddleware):
         return await handler(event, data)
 
 router.callback_query.middleware(ThrottleMiddleware())
-from aiogram import Router, F
-from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
-from aiogram.enums import ParseMode
-
-router = Router()
-
-# 1. Mijozlar bo'limi tugmasi bosilganda
-@router.message(F.text == "👥 Mijozlar bo'limi")
-async def mijozlar_bo_limi(message: Message):
-    # Bu yerda bazadan olingan mijozlarni tsikl orqali matnga yig'ib olasiz
-    text = (
-        "<b>👥 Barcha mijozlar ro'yxati:</b>\n\n"
-        "<b>1.</b> 👤 <b>Behruz</b>\n"
-        "├ 🆔 <code>8488028783</code>\n"
-        "└ 📞 +998954261261\n\n"
-        "<b>2.</b> 👤 <b>Alisher</b>\n"
-        "├ 🆔 <code>1234567890</code>\n"
-        "└ 📞 +998901234567\n\n"
-        "📊 <b>Jami mijozlar:</b> 2 ta"
-    )
-    
-    await message.answer(text, parse_mode=ParseMode.HTML)
-
-
-# 2. Xodimlar bo'limi tugmasi bosilganda
-@router.message(F.text == "👨‍💼 Xodimlar")
-async def xodimlar_bo_limi(message: Message):
-    # Inline tugmalarni shakllantiramiz
-    xodimlar_buttons = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(text="🛠 Usta qo'shish", callback_data="add_usta"),
-                InlineKeyboardButton(text="👑 Admin qo'shish", callback_data="add_admin")
-            ]
-        ]
-    )
-
-    text = (
-        "<b>👨‍💼 Xodimlar bo'limi</b>\n\n"
-        "<i>Joriy xodimlar ro'yxati:</i>\n\n"
-        "👑 <b>Adminlar:</b>\n"
-        "▫️ Behruz | 🆔 <code>8488028783</code>\n\n"
-        "🛠 <b>Ustalar:</b>\n"
-        "▫️ Sanjar | 🆔 <code>1234567890</code>\n\n"
-        "👇 <i>Yangi xodim qo'shish uchun quyidagi tugmalardan foydalaning:</i>"
-    )
-
-    await message.answer(text, reply_markup=xodimlar_buttons, parse_mode=ParseMode.HTML)
 
 # ============================== FSM STATES ===================================
 
@@ -159,7 +110,7 @@ async def init_db():
             tg_id INTEGER PRIMARY KEY,
             name TEXT,
             phone TEXT,
-            role TEXT DEFAULT 'user',       -- user / worker / admin
+            role TEXT DEFAULT 'user',       
             banned INTEGER DEFAULT 0,
             created_at TEXT
         );
@@ -175,10 +126,10 @@ async def init_db():
             sku TEXT,
             name TEXT,
             description TEXT,
-            price REAL,             -- NULL = "kelishiladi"
-            old_price REAL,         -- NULL = chegirmasiz
+            price REAL,             
+            old_price REAL,         
             quantity INTEGER DEFAULT 0,
-            photos TEXT DEFAULT '[]',   -- JSON list of file_id
+            photos TEXT DEFAULT '[]',   
             is_top INTEGER DEFAULT 0
         );
 
@@ -201,7 +152,7 @@ async def init_db():
             code TEXT,
             user_id INTEGER,
             total REAL,
-            status TEXT DEFAULT 'yangi',   -- yangi/qabul_qilindi/jarayonda/tayyor/yopildi/bekor_qilindi
+            status TEXT DEFAULT 'yangi',   
             comment TEXT,
             lat REAL,
             lon REAL,
@@ -217,7 +168,7 @@ async def init_db():
             name TEXT,
             qty INTEGER,
             price REAL,
-            item_type TEXT   -- stock / custom
+            item_type TEXT   
         );
 
         CREATE TABLE IF NOT EXISTS notify_stock (
@@ -369,42 +320,6 @@ def ikb(rows):
     )
 
 # ============================== HANDLERS =====================================
-
-@router.message(F.text == "👨‍💼 Xodimlar")
-async def adm_staff_menu(message: Message):
-    if not await is_admin(message.from_user.id):
-        return
-    await message.answer(
-        "👨‍💼 <b>Xodimlar bo'limi</b>\n\n"
-        "Admin yoki Usta qilmoqchi bo'lgan foydalanuvchining **Telegram ID** raqamini yuboring "
-        "(yoki pastdagi mijozlar bo'limidan foydalaning):"
-    )
-
-@router.message(F.text.regexp(r"^\d+$"))
-async def adm_set_role_by_id(message: Message):
-    if not await is_admin(message.from_user.id):
-        return
-    target_id = int(message.text)
-    user = await get_user(target_id)
-    if not user:
-        await message.answer(f"❌ ID: <code>{target_id}</code> bo'lgan foydalanuvchi bazadan topilmadi. U avval botga /start bosgan bo'lishi kerak.")
-        return
-    role_text = "👑 Admin" if user["role"] == "admin" else ("🛠 Usta" if user["role"] == "worker" else "👤 Oddiy mijoz")
-    text = (
-        f"👤 <b>Topilgan foydalanuvchi:</b>\n"
-        f"Ismi: {user['name']}\n"
-        f"Raqami: {user['phone']}\n"
-        f"ID: <code>{user['tg_id']}</code>\n"
-        f"Hozirgi roli: {role_text}\n\n"
-        f"Ushbu foydalanuvchiga qaysi lavozimni bermoqchisiz?"
-    )
-    await message.answer(
-        text,
-        reply_markup=ikb([
-            [("👑 Admin qilish", f"adm_user_role:{target_id}:admin"), ("🛠 Usta qilish", f"adm_user_role:{target_id}:worker")],
-            [("👤 Oddiy mijoz qilish", f"adm_user_role:{target_id}:user")]
-        ])
-    )
 
 @router.message(CommandStart())
 async def cmd_start(message: Message, state: FSMContext, command: CommandObject = None):
@@ -1165,6 +1080,64 @@ async def _send_user_card(chat_id, u):
         rows.append([("🚫 Bloklash", f"adm_user_ban:{u['tg_id']}:1")])
     rows.append([("🗑 Foydalanuvchini o'chirish", f"adm_user_del:{u['tg_id']}")])
     await bot.send_message(chat_id, text, reply_markup=ikb(rows))
+
+
+@router.message(F.text == "👨‍💼 Xodimlar")
+async def adm_staff_menu(message: Message):
+    if not await is_admin(message.from_user.id):
+        return
+    
+    # Bazadan adminlar va ustalarni olamiz
+    cur = await db.execute("SELECT * FROM users WHERE role IN ('admin', 'worker')")
+    staff = await cur.fetchall()
+    
+    admin_text = ""
+    worker_text = ""
+    for u in staff:
+        if u['role'] == 'admin':
+            admin_text += f"▫️ {u['name']} | 🆔 <code>{u['tg_id']}</code>\n"
+        else:
+            worker_text += f"▫️ {u['name']} | 🆔 <code>{u['tg_id']}</code>\n"
+            
+    text = (
+        "<b>👨‍💼 Xodimlar bo'limi</b>\n\n"
+        "<i>Joriy xodimlar ro'yxati:</i>\n\n"
+        "👑 <b>Adminlar:</b>\n"
+        f"{admin_text if admin_text else 'Yoq'}\n"
+        "🛠 <b>Ustalar:</b>\n"
+        f"{worker_text if worker_text else 'Yoq'}\n"
+        "👇 <i>Yangi xodim qo'shish uchun uning **Telegram ID** raqamini botga yuboring "
+        "(yoki Mijozlar bo'limidan foydalaning):</i>"
+    )
+    await message.answer(text, parse_mode=ParseMode.HTML)
+
+
+@router.message(F.text.regexp(r"^\d+$"))
+async def adm_set_role_by_id(message: Message):
+    if not await is_admin(message.from_user.id):
+        return
+    target_id = int(message.text)
+    user = await get_user(target_id)
+    if not user:
+        await message.answer(f"❌ ID: <code>{target_id}</code> bo'lgan foydalanuvchi bazadan topilmadi. U avval botga /start bosgan bo'lishi kerak.")
+        return
+    role_text = "👑 Admin" if user["role"] == "admin" else ("🛠 Usta" if user["role"] == "worker" else "👤 Oddiy mijoz")
+    text = (
+        f"👤 <b>Topilgan foydalanuvchi:</b>\n"
+        f"Ismi: {user['name']}\n"
+        f"Raqami: {user['phone']}\n"
+        f"ID: <code>{user['tg_id']}</code>\n"
+        f"Hozirgi roli: {role_text}\n\n"
+        f"Ushbu foydalanuvchiga qaysi lavozimni bermoqchisiz?"
+    )
+    await message.answer(
+        text,
+        reply_markup=ikb([
+            [("👑 Admin qilish", f"adm_user_role:{target_id}:admin"), ("🛠 Usta qilish", f"adm_user_role:{target_id}:worker")],
+            [("👤 Oddiy mijoz qilish", f"adm_user_role:{target_id}:user")]
+        ])
+    )
+
 
 @router.callback_query(F.data.startswith("adm_user_role:"))
 async def adm_user_role(call: CallbackQuery):
