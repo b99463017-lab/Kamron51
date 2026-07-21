@@ -81,8 +81,12 @@ class OrderFlow(StatesGroup):
     comment = State()
 
 class CustomOrder(StatesGroup):
-    photo = State()
+    photos = State()
     desc = State()
+
+class AdminPublishCustom(StatesGroup):
+    cat_id = State()
+    price = State()
 
 class AdminSettingsFSM(StatesGroup):
     phone = State()
@@ -91,10 +95,6 @@ class AdminSettingsFSM(StatesGroup):
 
 class AdminBroadcastFSM(StatesGroup):
     message = State()
-
-class AdminUserSearchFSM(StatesGroup):
-    query = State()
-
 
 # ============================== DATABASE ====================================
 
@@ -158,6 +158,7 @@ async def init_db():
             lon REAL,
             distance_km REAL,
             worker_id INTEGER,
+            custom_photos TEXT DEFAULT '[]',
             created_at TEXT
         );
 
@@ -206,9 +207,7 @@ async def init_db():
         "is_open": "1",
     }
     for k, v in defaults.items():
-        await db.execute(
-            "INSERT OR IGNORE INTO settings(key, value) VALUES (?,?)", (k, v)
-        )
+        await db.execute("INSERT OR IGNORE INTO settings(key, value) VALUES (?,?)", (k, v))
     await db.commit()
 
 async def get_setting(key: str) -> str:
@@ -797,6 +796,7 @@ async def _notify_workers_new_order(order_id):
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🗺 Xaritada ochish", url=maps_link(o["lat"], o["lon"]))],
         [InlineKeyboardButton(text="✅ Qabul qilish", callback_data=f"take:{order_id}")],
+        [InlineKeyboardButton(text="👨‍🔧 Ustaga biriktirish", callback_data=f"assign:{order_id}")]
     ])
     if WORKER_GROUP_ID:
         m = await bot.send_message(WORKER_GROUP_ID, text, reply_markup=kb)
@@ -814,6 +814,43 @@ async def _notify_workers_new_order(order_id):
         except Exception:
             pass
     await db.commit()
+
+@router.callback_query(F.data.startswith("assign:"))
+async def cb_assign_order(call: CallbackQuery):
+    if not await is_admin(call.from_user.id):
+        await call.answer("Faqat adminlar biriktira oladi!", show_alert=True)
+        return
+    order_id = int(call.data.split(":")[1])
+    workers = await (await db.execute("SELECT * FROM users WHERE role='worker'")).fetchall()
+    if not workers:
+        await call.answer("Hali ustalar ro'yxati bo'sh!", show_alert=True)
+        return
+    rows = [[(f"🛠 {w['name']}", f"assign_to:{order_id}:{w['tg_id']}")] for w in workers]
+    await call.message.answer("Ushbu buyurtmani qaysi ustaga biriktirasiz?", reply_markup=ikb(rows))
+    await call.answer()
+
+@router.callback_query(F.data.startswith("assign_to:"))
+async def cb_assign_to_worker(call: CallbackQuery):
+    _, order_id, worker_id = call.data.split(":")
+    order_id, worker_id = int(order_id), int(worker_id)
+    await db.execute("UPDATE orders SET worker_id=?, status='qabul_qilindi' WHERE id=?", (worker_id, order_id))
+    await db.commit()
+    o = await (await db.execute("SELECT * FROM orders WHERE id=?", (order_id,))).fetchone()
+    worker = await get_user(worker_id)
+    await call.message.edit_text(f"✅ Buyurtma {o['code']} usta <b>{worker['name']}</b>ga biriktirildi!")
+    try:
+        await bot.send_message(
+            worker_id,
+            f"🔔 Sizga yangi buyurtma biriktirildi: <b>{o['code']}</b>",
+            reply_markup=ikb([
+                [("🔄 Jarayonda", f"ordstatus:{order_id}:jarayonda")],
+                [("✅ Tayyor", f"ordstatus:{order_id}:tayyor")],
+                [("🏁 Yopish", f"ordstatus:{order_id}:yopildi")],
+            ])
+        )
+    except Exception:
+        pass
+    await call.answer("Biriktirildi!")
 
 @router.callback_query(F.data.startswith("take:"))
 async def cb_worker_take(call: CallbackQuery):
@@ -915,27 +952,62 @@ async def cb_order_cancel(call: CallbackQuery):
 
 @router.message(F.text == "📐 O'z loyihamni yuborish")
 async def custom_order_start(message: Message, state: FSMContext):
-    await state.set_state(CustomOrder.photo)
-    await message.answer("O'zingiz xohlagan mebel rasmini yuboring:")
+    await state.set_state(CustomOrder.photos)
+    await state.update_data(photos=[])
+    await message.answer("O'zingiz xohlagan mebel rasmlarini yuboring (bir nechta yuborishingiz mumkin). Tugagach /done deb yozing:")
 
-@router.message(CustomOrder.photo, F.photo)
+@router.message(CustomOrder.photos, F.photo)
 async def custom_order_photo(message: Message, state: FSMContext):
-    await state.update_data(photo=message.photo[-1].file_id)
+    data = await state.get_data()
+    photos = data.get("photos", [])
+    photos.append(message.photo[-1].file_id)
+    await state.update_data(photos=photos)
+    await message.answer(f"✅ Rasm qabul qilindi ({len(photos)} ta). Yana yuboring yoki /done deb yozing.")
+
+@router.message(CustomOrder.photos, Command("done"))
+async def custom_order_photos_done(message: Message, state: FSMContext):
+    data = await state.get_data()
+    if not data.get("photos"):
+        await message.answer("Kamida 1 ta rasm yuborishingiz kerak!")
+        return
     await state.set_state(CustomOrder.desc)
-    await message.answer("Endi taxminiy o'lcham va tavsifni yozing:")
+    await message.answer("Endi taxminiy o'lchamlari va xohishlaringiz haqida yozing:")
 
 @router.message(CustomOrder.desc)
 async def custom_order_desc(message: Message, state: FSMContext):
     data = await state.get_data()
     user = await get_user(message.from_user.id)
-    caption = (
-        f"📐 <b>Yangi maxsus loyiha so'rovi</b>\n"
-        f"Mijoz: {user['name']} ({user['phone']})\n"
-        f"Tavsif: {message.text.strip()}\nNarxi: kelishiladi"
+    photos = data.get("photos", [])
+    desc = message.text.strip()
+
+    code = await gen_order_code()
+    now = datetime.now().isoformat()
+    cur = await db.execute(
+        "INSERT INTO orders(code, user_id, total, status, comment, custom_photos, created_at) "
+        "VALUES (?,?,?,?,?,?,?)",
+        (code, message.from_user.id, 0, "yangi", desc, json.dumps(photos), now),
     )
+    order_id = cur.lastrowid
+    await db.commit()
+
+    caption = (
+        f"📐 <b>Yangi maxsus loyiha so'rovi ({code})</b>\n"
+        f"Mijoz: {user['name']} ({user['phone']})\n"
+        f"Tavsif: {desc}\n"
+        f"Narxi: kelishiladi"
+    )
+
+    kb = ikb([
+        [("🏷 Sotuvga (Katalogga) qo'yish", f"publish_custom:{order_id}")],
+        [("👨‍🔧 Ustaga biriktirish", f"assign:{order_id}")]
+    ])
+
     for admin_id in ADMIN_IDS:
         try:
-            m = await bot.send_photo(admin_id, data["photo"], caption=caption)
+            if photos:
+                m = await bot.send_photo(admin_id, photos[0], caption=caption, reply_markup=kb)
+            else:
+                m = await bot.send_message(admin_id, caption, reply_markup=kb)
             await db.execute(
                 "INSERT INTO msg_map(admin_chat_id, admin_msg_id, customer_id, created_at) VALUES (?,?,?,?)",
                 (admin_id, m.message_id, message.from_user.id, datetime.now().isoformat()),
@@ -948,6 +1020,53 @@ async def custom_order_desc(message: Message, state: FSMContext):
         "✅ So'rovingiz adminga yuborildi, tez orada siz bilan bog'lanamiz.",
         reply_markup=await kb_main(message.from_user.id),
     )
+
+@router.callback_query(F.data.startswith("publish_custom:"))
+async def cb_publish_custom(call: CallbackQuery, state: FSMContext):
+    if not await is_admin(call.from_user.id):
+        return
+    order_id = int(call.data.split(":")[1])
+    await state.update_data(order_id=order_id)
+    
+    cats = await (await db.execute("SELECT * FROM categories")).fetchall()
+    if not cats:
+        await call.answer("Bo'limlar mavjud emas!", show_alert=True)
+        return
+    rows = [[(c["name"], f"pubcat:{c['id']}")] for c in cats]
+    await call.message.answer("Ushbu loyihani qaysi bo'limga qo'shmoqchisiz?", reply_markup=ikb(rows))
+    await call.answer()
+
+@router.callback_query(F.data.startswith("pubcat:"))
+async def cb_pubcat_select(call: CallbackQuery, state: FSMContext):
+    cat_id = int(call.data.split(":")[1])
+    await state.update_data(cat_id=cat_id)
+    await state.set_state(AdminPublishCustom.price)
+    await call.message.answer("Ushbu loyiha uchun sotuv narxini kiriting (so'mda, faqat raqam):")
+    await call.answer()
+
+@router.message(AdminPublishCustom.price)
+async def adm_pub_price_save(message: Message, state: FSMContext):
+    try:
+        price = float(message.text.strip().replace(" ", ""))
+    except ValueError:
+        await message.answer("Faqat raqam kiriting.")
+        return
+    data = await state.get_data()
+    o = await (await db.execute("SELECT * FROM orders WHERE id=?", (data["order_id"],))).fetchone()
+    
+    cur = await db.execute(
+        "INSERT INTO products(category_id, name, description, price, quantity, photos, sku) "
+        "VALUES (?,?,?,?,?,?,?)",
+        (
+            data["cat_id"], f"Maxsus mebel ({o['code']})", o["comment"],
+            price, 0, o["custom_photos"], "",
+        ),
+    )
+    pid = cur.lastrowid
+    await db.execute("UPDATE products SET sku=? WHERE id=?", (f"#GM-{100 + pid}", pid))
+    await db.commit()
+    await state.clear()
+    await message.answer("✅ Maxsus loyiha katalogga sotuvga qo'shildi!", reply_markup=kb_admin())
 
 # ============================== ADDRESS / HELP / CALL / PORTFOLIO ============
 
@@ -1002,7 +1121,7 @@ async def call_request(message: Message):
     await db.commit()
     await message.answer("✅ So'rovingiz yuborildi, tez orada sizga qo'ng'iroq qilamiz.")
 
-# ============================== CRM: REPLY ===================================
+# ============================== CRM: REPLY (Mijoz va Usta Chat) ===================================
 
 @router.message(F.reply_to_message)
 async def crm_reply_handler(message: Message):
@@ -1016,7 +1135,8 @@ async def crm_reply_handler(message: Message):
     if not row:
         return
     try:
-        await bot.send_message(row["customer_id"], f"💬 Admin javobi:\n{message.text or message.caption or ''}")
+        sender_role = "Usta" if await is_worker(message.from_user.id) else "Admin"
+        await bot.send_message(row["customer_id"], f"💬 {sender_role} javobi:\n{message.text or message.caption or ''}")
         await message.reply("✅ Mijozga yuborildi.")
     except Exception:
         await message.reply("❌ Mijozga yuborib bo'lmadi (u botni bloklagan bo'lishi mumkin).")
@@ -1027,17 +1147,38 @@ async def crm_reply_handler(message: Message):
 async def worker_panel(message: Message):
     if not await is_worker(message.from_user.id):
         return
+    
     cur = await db.execute(
         "SELECT * FROM orders WHERE worker_id=? AND status IN ('qabul_qilindi','jarayonda') ORDER BY id DESC",
         (message.from_user.id,),
     )
     rows = await cur.fetchall()
+    
+    now = datetime.now()
+    d_start = datetime(now.year, now.month, now.day).isoformat()
+    m_start = datetime(now.year, now.month, 1).isoformat()
+    y_start = datetime(now.year, 1, 1).isoformat()
+
+    w_id = message.from_user.id
+    d_sum = (await (await db.execute("SELECT COALESCE(SUM(total),0) s FROM orders WHERE worker_id=? AND status='yopildi' AND created_at>=?", (w_id, d_start))).fetchone())["s"]
+    m_sum = (await (await db.execute("SELECT COALESCE(SUM(total),0) s FROM orders WHERE worker_id=? AND status='yopildi' AND created_at>=?", (w_id, m_start))).fetchone())["s"]
+    y_sum = (await (await db.execute("SELECT COALESCE(SUM(total),0) s FROM orders WHERE worker_id=? AND status='yopildi' AND created_at>=?", (w_id, y_start))).fetchone())["s"]
+
+    stats_text = (
+        f"🛠 <b>Usta ish ko'rsatkichlari:</b>\n"
+        f"☀️ Bugun: <b>{fmt_price(d_sum)}</b>\n"
+        f"📅 Shu oy: <b>{fmt_price(m_sum)}</b>\n"
+        f"📆 Shu yil: <b>{fmt_price(y_sum)}</b>\n\n"
+    )
+    
     if not rows:
-        await message.answer("Sizda faol buyurtmalar yo'q.")
+        await message.answer(stats_text + "Sizda faol buyurtmalar yo'q.")
         return
+        
+    await message.answer(stats_text + "<b>Sizning faol buyurtmalaringiz:</b>")
     for o in rows:
         await message.answer(
-            f"{o['code']} — {o['status']}",
+            f"{o['code']} — {o['status']}\nIzoh: {o['comment'] or 'Yoq'}\nJami: {fmt_price(o['total'])}",
             reply_markup=ikb([
                 [("🔄 Jarayonda", f"ordstatus:{o['id']}:jarayonda")],
                 [("✅ Tayyor", f"ordstatus:{o['id']}:tayyor")],
@@ -1098,7 +1239,6 @@ async def _send_user_card(chat_id, u):
     rows.append([("🗑 Foydalanuvchini o'chirish", f"adm_user_del:{u['tg_id']}")])
     await bot.send_message(chat_id, text, reply_markup=ikb(rows))
 
-
 @router.message(F.text == "👨‍💼 Xodimlar")
 async def adm_staff_menu(message: Message):
     if not await is_admin(message.from_user.id):
@@ -1127,7 +1267,6 @@ async def adm_staff_menu(message: Message):
     )
     await message.answer(text, parse_mode=ParseMode.HTML)
 
-# XATOLIK MANBAI SHU YERDA EDI: StateFilter(None) qo'shildi!
 @router.message(StateFilter(None), F.text.regexp(r"^\d+$"))
 async def adm_set_role_by_id(message: Message):
     if not await is_admin(message.from_user.id):
@@ -1153,7 +1292,6 @@ async def adm_set_role_by_id(message: Message):
             [("👤 Oddiy mijoz qilish", f"adm_user_role:{target_id}:user")]
         ])
     )
-
 
 @router.callback_query(F.data.startswith("adm_user_role:"))
 async def adm_user_role(call: CallbackQuery):
@@ -1633,29 +1771,35 @@ async def adm_stats(message: Message):
         return
     total_users = (await (await db.execute("SELECT COUNT(*) n FROM users")).fetchone())["n"]
     total_orders = (await (await db.execute("SELECT COUNT(*) n FROM orders")).fetchone())["n"]
-    revenue = (await (await db.execute(
-        "SELECT COALESCE(SUM(total),0) s FROM orders WHERE status='yopildi'"
-    )).fetchone())["s"]
+
     now = datetime.now()
-    day_ago = (now - timedelta(days=1)).isoformat()
-    week_ago = (now - timedelta(days=7)).isoformat()
-    month_ago = (now - timedelta(days=30)).isoformat()
-    d = (await (await db.execute("SELECT COUNT(*) n FROM orders WHERE created_at>=?", (day_ago,))).fetchone())["n"]
-    w = (await (await db.execute("SELECT COUNT(*) n FROM orders WHERE created_at>=?", (week_ago,))).fetchone())["n"]
-    m = (await (await db.execute("SELECT COUNT(*) n FROM orders WHERE created_at>=?", (month_ago,))).fetchone())["n"]
+    d_start = datetime(now.year, now.month, now.day).isoformat()
+    m_start = datetime(now.year, now.month, 1).isoformat()
+    y_start = datetime(now.year, 1, 1).isoformat()
+
+    d_rev = (await (await db.execute("SELECT COALESCE(SUM(total),0) s FROM orders WHERE status='yopildi' AND created_at>=?", (d_start,))).fetchone())["s"]
+    m_rev = (await (await db.execute("SELECT COALESCE(SUM(total),0) s FROM orders WHERE status='yopildi' AND created_at>=?", (m_start,))).fetchone())["s"]
+    y_rev = (await (await db.execute("SELECT COALESCE(SUM(total),0) s FROM orders WHERE status='yopildi' AND created_at>=?", (y_start,))).fetchone())["s"]
+
+    d_cnt = (await (await db.execute("SELECT COUNT(*) n FROM orders WHERE created_at>=?", (d_start,))).fetchone())["n"]
+    m_cnt = (await (await db.execute("SELECT COUNT(*) n FROM orders WHERE created_at>=?", (m_start,))).fetchone())["n"]
+    y_cnt = (await (await db.execute("SELECT COUNT(*) n FROM orders WHERE created_at>=?", (y_start,))).fetchone())["n"]
+
     top = await (await db.execute(
         "SELECT name, SUM(qty) q FROM order_items GROUP BY product_id ORDER BY q DESC LIMIT 3"
     )).fetchall()
     zero_stock = (await (await db.execute("SELECT COUNT(*) n FROM products WHERE quantity=0")).fetchone())["n"]
 
     text = (
-        f"📊 <b>Statistika</b>\n\n"
-        f"Jami foydalanuvchilar: {total_users}\n"
-        f"Jami buyurtmalar: {total_orders}\n"
-        f"Yopilgan buyurtmalar summasi: {fmt_price(revenue)}\n\n"
-        f"So'nggi 24 soat: {d} ta\nSo'nggi 7 kun: {w} ta\nSo'nggi 30 kun: {m} ta\n\n"
-        f"Omborda tugagan mahsulotlar: {zero_stock} ta\n\n"
-        f"🔥 Eng ko'p sotilgan:\n" + "\n".join(f"• {t['name']} — {t['q']} dona" for t in top)
+        f"📊 <b>Umumiy statistika</b>\n\n"
+        f"👥 Jami foydalanuvchilar: {total_users}\n"
+        f"📦 Jami buyurtmalar: {total_orders}\n"
+        f"⚠️ Omborda tugagan mahsulotlar: {zero_stock} ta\n\n"
+        f"💰 <b>Daromad ko'rsatkichlari:</b>\n"
+        f"☀️ Kunlik ({d_cnt} buyurtma): <b>{fmt_price(d_rev)}</b>\n"
+        f"📅 Oylik ({m_cnt} buyurtma): <b>{fmt_price(m_rev)}</b>\n"
+        f"📆 Yillik ({y_cnt} buyurtma): <b>{fmt_price(y_rev)}</b>\n\n"
+        f"🔥 <b>Eng ko'p sotilgan:</b>\n" + ("\n".join(f"• {t['name']} — {t['q']} dona" for t in top) if top else "Hali sotuv yo'q")
     )
     await message.answer(text)
 
