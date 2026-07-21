@@ -3,13 +3,13 @@ import json
 import logging
 import math
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 
 import aiosqlite
 from aiogram import Bot, Dispatcher, Router, F, BaseMiddleware
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
-from aiogram.filters import CommandStart, Command, CommandObject, StateFilter
+from aiogram.filters import CommandStart, Command, CommandObject
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
@@ -23,7 +23,7 @@ from aiogram.types import (
 
 BOT_TOKEN = "8919365987:AAHsSGcZaBJXN9hs-FMy_t_3OB6pUi_e3cg"
 ADMIN_IDS = [8488028783]          # Admin Telegram ID
-WORKER_GROUP_ID = None            # Ustalar guruhining chat_id si
+WORKER_GROUP_ID = None            # Ustalar guruhining chat_id si (agar mavjud bo'lsa)
 DB_PATH = "gold_mebel.db"
 
 logging.basicConfig(level=logging.INFO)
@@ -96,7 +96,6 @@ class AdminSettingsFSM(StatesGroup):
 class AdminBroadcastFSM(StatesGroup):
     message = State()
 
-# --- Yangi FSM lar (Usta va Admin uchun) ---
 class WorkerNewJob(StatesGroup):
     category = State()
     photo = State()
@@ -210,7 +209,6 @@ async def init_db():
             created_at TEXT
         );
         
-        -- Yangi qo'shilgan jadvallar
         CREATE TABLE IF NOT EXISTS worker_jobs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             worker_id INTEGER,
@@ -329,7 +327,6 @@ async def kb_main(tg_id: int):
     kb = [[KeyboardButton(text=t) for t in row] for row in rows]
     return ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True)
 
-# Yangi: Usta uchun alohida menyu
 def kb_worker_menu():
     return ReplyKeyboardMarkup(
         keyboard=[
@@ -341,7 +338,6 @@ def kb_worker_menu():
         resize_keyboard=True
     )
 
-# Yangilangan: Admin menyusi
 def kb_admin():
     return ReplyKeyboardMarkup(
         keyboard=[
@@ -472,7 +468,7 @@ async def _save_new_phone(message, state, phone):
     await message.answer("✅ Telefon raqam yangilandi.", reply_markup=await kb_main(message.from_user.id))
 
 # ============================== CATALOG ======================================
-# (Barcha avvalgi katalog logikalari to'liq saqlanadi)
+
 @router.message(F.text == "🗂 Katalog")
 async def catalog_open(message: Message):
     cur = await db.execute("SELECT * FROM categories ORDER BY id")
@@ -664,6 +660,7 @@ async def show_favorites(message: Message):
             await show_product(message.chat.id, message.from_user.id, p["id"], 0)
 
 # ============================== CART =========================================
+
 @router.callback_query(F.data.startswith("addcart:"))
 async def cb_add_cart(call: CallbackQuery):
     pid = int(call.data.split(":")[1])
@@ -718,6 +715,7 @@ async def cb_cart_clear(call: CallbackQuery):
     await call.message.answer("🗑 Savat bo'shatildi.")
 
 # ============================== ORDER FLOW ===================================
+
 @router.callback_query(F.data.startswith("buy:"))
 async def cb_buy_single(call: CallbackQuery, state: FSMContext):
     pid = int(call.data.split(":")[1])
@@ -951,6 +949,7 @@ async def cb_order_status(call: CallbackQuery):
     await call.answer("Holat yangilandi")
 
 # ============================== MY ORDERS ====================================
+
 @router.message(F.text == "📦 Buyurtmalarim")
 async def my_orders(message: Message):
     cur = await db.execute(
@@ -990,6 +989,7 @@ async def cb_order_cancel(call: CallbackQuery):
             pass
 
 # ============================== CUSTOM ORDER (own project) ===================
+
 @router.message(F.text == "📐 O'z loyihamni yuborish")
 async def custom_order_start(message: Message, state: FSMContext):
     await state.set_state(CustomOrder.photos)
@@ -1109,6 +1109,7 @@ async def adm_pub_price_save(message: Message, state: FSMContext):
     await message.answer("✅ Maxsus loyiha katalogga sotuvga qo'shildi!", reply_markup=kb_admin())
 
 # ============================== ADDRESS / HELP / CALL / PORTFOLIO ============
+
 @router.message(F.text == "🖼 Portfolio")
 async def show_user_portfolio(message: Message):
     cur = await db.execute("SELECT * FROM portfolio ORDER BY id DESC LIMIT 10")
@@ -1230,7 +1231,6 @@ async def worker_my_jobs(message: Message):
             ]),
         )
 
-# FSM: Usta yangi ish qo'shishi
 @router.message(F.text == "➕ Yangi ish qo'shish")
 async def worker_new_job_start(message: Message, state: FSMContext):
     if not await is_worker(message.from_user.id): return
@@ -1288,7 +1288,6 @@ async def worker_job_desc(message: Message, state: FSMContext):
         except Exception:
             pass
 
-# FSM: Usta material so'rashi
 @router.message(F.text == "🧰 Material so'rash")
 async def worker_material_start(message: Message, state: FSMContext):
     if not await is_worker(message.from_user.id): return
@@ -1327,8 +1326,6 @@ async def admin_panel(message: Message):
     if not await is_admin(message.from_user.id):
         return
     await message.answer("⚙️ <b>Admin panelga xush kelibsiz!</b>\nKerakli bo'limni tanlang:", reply_markup=kb_admin())
-
-# --- YANGI ADMIN QISMLARI ---
 
 @router.callback_query(F.data.startswith("wjob_app:"))
 async def adm_wjob_approve(call: CallbackQuery):
@@ -1391,7 +1388,6 @@ async def adm_workers_report(message: Message):
 async def adm_storage_requests(message: Message):
     if not await is_admin(message.from_user.id): return
     
-    # 1. Ombor nazorati (Tugaganlar)
     cur = await db.execute("SELECT * FROM products WHERE quantity=0")
     prods = await cur.fetchall()
     text = "📦 <b>Omborda tugagan mahsulotlar:</b>\n"
@@ -1400,7 +1396,6 @@ async def adm_storage_requests(message: Message):
     else:
         text += "\n".join(f"• {p['name']} ({p['sku']})" for p in prods) + "\n\n"
         
-    # 2. Yangi material so'rovlari
     cur = await db.execute("SELECT m.*, u.name FROM material_requests m JOIN users u ON m.worker_id=u.tg_id WHERE m.status='kutilmoqda'")
     reqs = await cur.fetchall()
     text += "🧰 <b>Ochiq material so'rovlari:</b>\n"
@@ -1437,8 +1432,6 @@ async def adm_register_worker_save(message: Message, state: FSMContext):
         await bot.send_message(tg_id, "🎉 Siz admin tomonidan <b>Usta</b> qilib belgilandingiz! Endi siz uchun yangi menyu ochiq.", reply_markup=kb_worker_menu())
     except Exception: pass
 
-
-# (Boshqa admin paneldagi hamma eski xodimlar va bo'limlar nazorati saqlanib qoldi)
 @router.message(F.text == "👥 Mijozlar bo'limi")
 async def adm_clients_menu(message: Message):
     if not await is_admin(message.from_user.id): return
@@ -1529,7 +1522,6 @@ async def adm_user_del(call: CallbackQuery):
     await db.commit()
     await call.answer("Foydalanuvchi o'chirildi", show_alert=True)
     await call.message.delete()
-
 
 @router.message(F.text == "🗂 Bo'limlar boshqaruvi")
 async def adm_cats(message: Message):
